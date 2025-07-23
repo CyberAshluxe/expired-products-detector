@@ -13,20 +13,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const expiredCount = document.getElementById('expiredCount');
     const reportedList = document.getElementById('reportedList');
 
-    // --- Data Store ---
-    // In a real application, this would be on a server/database.
-    let inventory = [];
-    let productIdCounter = 1;
-
-    // --- Core Functions ---
+    // --- Data Store with Local Storage ---
+    // Load inventory and counter from localStorage, or use defaults.
+    let inventory = JSON.parse(localStorage.getItem('expireGuardInventory')) || [];
+    let productIdCounter = parseInt(localStorage.getItem('expireGuardCounter')) || 1;
 
     /**
-     * Renders the entire inventory list and updates all dashboards.
+     * Saves the current application state to localStorage.
+     */
+    function saveState() {
+        localStorage.setItem('expireGuardInventory', JSON.stringify(inventory));
+        localStorage.setItem('expireGuardCounter', productIdCounter.toString());
+    }
+
+    /**
+     * Renders the entire UI based on the current inventory state.
      */
     function renderAll() {
         renderInventory();
         updateScannerOptions();
         updateRegulatorDashboard();
+        renderReportedList();
     }
 
     /**
@@ -80,6 +87,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Renders the list of products reported by consumers.
+     */
+    function renderReportedList() {
+        reportedList.innerHTML = ''; // Clear the list first
+        const productsReported = inventory.filter(p => p.reported);
+
+        if (productsReported.length === 0) {
+            reportedList.innerHTML = '<li class="list-group-item text-center text-muted">No products reported by consumers yet.</li>';
+        } else {
+            productsReported.forEach(product => {
+                const li = document.createElement('li');
+                li.className = 'list-group-item list-group-item-danger';
+                li.textContent = `Consumer reported ${product.name} (ID: ${product.id}, Batch: ${product.batch}) as expired.`;
+                reportedList.appendChild(li);
+            });
+        }
+    }
+
+    /**
      * Populates the consumer's "scanner" dropdown with current inventory.
      */
     function updateScannerOptions() {
@@ -103,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const statusInfo = getProductStatus(product.expiryDate);
             if (statusInfo.status === 'Expired') {
                 expired++;
-            } else if (statusInfo.class === 'list-group-item-warning') {
+            } else if (statusInfo.class.includes('warning')) {
                 nearExpiry++;
             }
         });
@@ -124,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const batch = document.getElementById('batchNumber').value;
         const expiryDate = document.getElementById('expiryDate').value;
         
-        // Create a new product object
         const newProduct = {
             id: `PROD${productIdCounter++}`,
             name,
@@ -134,8 +159,10 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         inventory.push(newProduct);
+        saveState(); // <-- SAVE to localStorage
+        
         addProductForm.reset();
-        renderAll(); // Re-render everything
+        renderAll(); 
     }
 
     /**
@@ -145,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedId = productScannerSelect.value;
         const product = inventory.find(p => p.id === selectedId);
         
-        verificationResult.innerHTML = ''; // Clear previous result
+        verificationResult.innerHTML = '';
 
         if (!product) {
             verificationResult.innerHTML = `
@@ -158,10 +185,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusInfo = getProductStatus(product.expiryDate);
         let alertClass = 'alert-success';
         let reportButton = '';
+        
+        const isReported = product.reported;
 
         if (statusInfo.status === 'Expired') {
             alertClass = 'alert-danger';
-            reportButton = `<button class="btn btn-danger mt-2" onclick="reportProduct('${product.id}')">Report Expired Product</button>`;
+            reportButton = `<button class="btn btn-danger mt-2" onclick="reportProduct('${product.id}')" ${isReported ? 'disabled' : ''}>
+                                ${isReported ? 'Already Reported' : 'Report Expired Product'}
+                            </button>`;
         } else if (statusInfo.class.includes('warning')) {
             alertClass = 'alert-warning';
         }
@@ -180,32 +211,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // --- Global Function for Reporting ---
-    // Needs to be global to be called from dynamically created HTML
     window.reportProduct = function(productId) {
         const product = inventory.find(p => p.id === productId);
         if (product && !product.reported) {
             product.reported = true;
+            saveState(); // <-- SAVE to localStorage after reporting
             
-            if(reportedList.querySelector('.text-muted')){
-                reportedList.innerHTML = ''; // Clear "no reports" message
-            }
+            renderReportedList(); // Update the UI for reported list
 
-            const li = document.createElement('li');
-            li.className = 'list-group-item list-group-item-danger';
-            li.textContent = `Consumer reported ${product.name} (ID: ${product.id}, Batch: ${product.batch}) as expired.`;
-            reportedList.appendChild(li);
-
-            // Give feedback to the user
-            verificationResult.innerHTML += `<div class="alert alert-info mt-2">Product has been reported to NAFDAC. Thank you!</div>`;
+            verificationResult.innerHTML += `<div class="alert alert-info mt-2">Product has been reported. Thank you!</div>`;
             document.querySelector(`button[onclick="reportProduct('${product.id}')"]`).disabled = true;
+            document.querySelector(`button[onclick="reportProduct('${product.id}')"]`).textContent = 'Already Reported';
         }
     }
-
 
     // --- Event Listeners ---
     addProductForm.addEventListener('submit', handleAddProduct);
     verifyProductBtn.addEventListener('click', handleVerifyProduct);
 
-    // Initial render on page load
+    // Initial render on page load from saved data
     renderAll();
 });
